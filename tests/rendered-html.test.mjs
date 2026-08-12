@@ -63,3 +63,21 @@ test("prepares Supabase shared workspaces without replacing offline storage", as
   assert.match(migration, /workspace-photos/);
   assert.match(guide, /Do not paste either value into chat or commit it/);
 });
+
+test("ships the restrained navy industrial visual system", async () => {
+  const [css, layout, manifest, favicon] = await Promise.all([
+    source("app/globals.css"),
+    source("app/layout.tsx"),
+    source("public/manifest.webmanifest"),
+    source("public/favicon.svg"),
+  ]);
+
+  assert.match(css, /--bg:#070d18;--panel:#0d1828;--panel2:#132238/);
+  assert.match(css, /VIGILKLINE navy industrial theme/);
+  assert.match(css, /body:before[\s\S]*repeating-linear-gradient/);
+  assert.match(css, /font-family:var\(--font-geist-mono\),monospace;text-transform:uppercase/);
+  assert.match(css, /button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible/);
+  assert.match(layout, /theme-color" content="#07101d"/);
+  assert.match(manifest, /"background_color": "#07101d"/);
+  assert.match(favicon, /fill="#5b91ec"/);
+});

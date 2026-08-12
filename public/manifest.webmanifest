@@ -4,7 +4,7 @@
   "description": "Resale inventory, sourcing sessions, money and planning.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f3f1ea",
-  "theme_color": "#151713",
+  "background_color": "#07101d",
+  "theme_color": "#07101d",
   "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
 }
