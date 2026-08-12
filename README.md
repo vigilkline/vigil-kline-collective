@@ -1,8 +1,8 @@
-# vinext-starter
+# VIGILKLINE
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+A dark, offline-first workspace for resale inventory, multi-store sourcing
+sessions, finances, and brand planning. It runs on vinext and currently saves
+operational data in browser IndexedDB.
 
 ## Prerequisites
 
@@ -18,14 +18,16 @@ npm run build
 
 This starter does not use `wrangler.jsonc`.
 
-## Included Shape
+## Current architecture
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+- `app/` contains the VIGILKLINE UI and offline persistence.
+- `server/routes/api/garment-analysis.post.ts` keeps garment analysis server-side.
+- `lib/supabase/client.ts` is dormant until public Supabase configuration exists.
+- `supabase/migrations/` prepares authenticated shared workspaces with row-level security and private photo storage.
+- [Supabase shared-workspace setup](docs/supabase-shared-workspace.md) explains the exact next step and rollout sequence.
+
+Do not commit environment files or service-role credentials. The app continues
+to work locally when Supabase is not configured.
 
 ## Workspace Auth Headers
 
@@ -91,7 +93,7 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - `npm run dev`: start local development
 - `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
+- `npm test`: build and verify the focused VIGILKLINE regression checks
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
 ## Learn More

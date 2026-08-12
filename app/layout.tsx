@@ -8,7 +8,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   metadataBase: new URL("https://vigilkline.local"),
   title: "VIGILKLINE — Resale, under control",
-  description: "A focused operating system for independent resale inventory, selling, orders, money, and planning.",
+  description: "A focused operating system for resale inventory, sourcing sessions, finances, and planning.",
   applicationName: "VIGILKLINE",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/favicon.svg", apple: "/favicon.svg" },

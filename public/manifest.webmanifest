@@ -1,7 +1,7 @@
 {
   "name": "VIGILKLINE Resale OS",
   "short_name": "VIGILKLINE",
-  "description": "Resale inventory, selling, fulfillment, money and planning.",
+  "description": "Resale inventory, sourcing sessions, money and planning.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f3f1ea",

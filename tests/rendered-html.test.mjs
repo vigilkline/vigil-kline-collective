@@ -3,54 +3,63 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const projectRoot = new URL("../", import.meta.url);
+const source = (path) => readFile(new URL(path, projectRoot), "utf8");
 
-async function source(path) {
-  return readFile(new URL(path, projectRoot), "utf8");
-}
-
-test("uses Inventory as the single unsold-item workspace", async () => {
+test("ships only the focused four-view navigation", async () => {
   const page = await source("app/page.tsx");
 
-  assert.match(page, /type View = [^;]*"inventory"[^;]*"performance"/);
-  assert.doesNotMatch(page, /id:\s*"listings"/i);
-  assert.doesNotMatch(page, /function Listings\b/);
+  assert.match(page, /type View = "dashboard" \| "inventory" \| "sessions" \| "finances"/);
+  for (const label of ["Dashboard", "Inventory", "Sessions", "Finances"]) {
+    assert.match(page, new RegExp(`label: "${label}"`));
+  }
+  assert.doesNotMatch(page, /id:\s*"listings"|id:\s*"orders"|id:\s*"performance"/i);
+  assert.doesNotMatch(page, /function Listings\b|function Orders\b|function Performance\b|function IntegrationSetup\b/);
+  assert.doesNotMatch(page, /Instagram|Depop|Shared accounts not connected|LOCAL WORKSPACE/);
+});
+
+test("uses Inventory as the complete unsold-item workspace", async () => {
+  const page = await source("app/page.tsx");
+
   assert.match(page, /ALL UNSOLD STOCK/);
   assert.match(page, /PHOTO[\s\S]*ITEM[\s\S]*SIZE[\s\S]*CONDITION[\s\S]*COST[\s\S]*EST\. RESALE[\s\S]*SELL STATUS/);
   assert.match(page, /\["Owned","Ready","Published","Sold"\]/);
-  assert.match(page, /Instagram[\s\S]*Not connected · manual status only/);
-  assert.match(page, /Depop[\s\S]*Not connected · manual status only/);
+  assert.match(page, /Marked sold and added to finances/);
 });
 
-test("retains complete store segments and separate candidate fields", async () => {
-  const page = await source("app/page.tsx");
+test("keeps shopping capture-only and decisions inside store review", async () => {
+  const [page, css] = await Promise.all([source("app/page.tsx"), source("app/feature-updates.css")]);
+  const liveCart = page.slice(page.indexOf('className="cockpit-grid"'), page.indexOf('className="session-finish"'));
+  const review = page.slice(page.indexOf('className="review-backdrop"'), page.indexOf('className="capture-sheet"'));
 
   for (const label of ["Brand", "Description", "Size", "Condition", "Category", "Tag price *", "Resale estimate"]) {
     assert.match(page, new RegExp(`>${label.replace("*", "\\*")}<`));
   }
+  assert.doesNotMatch(liveCart, /Bought \/ Keep|Passed \/ Drop|decision-buttons/);
+  assert.match(liveCart, /Decide when you finish this store/);
+  assert.match(review, />✓ Bought<|>Passed</);
   assert.match(page, /Current store name \*/);
   assert.match(page, /Next store name \*/);
   assert.match(page, /projectedResale:projected,projectedProfit:potential/);
-  assert.match(page, /Compare store performance/);
-  assert.match(page, /DECISIONS[\s\S]*TIME[\s\S]*SPEND[\s\S]*EST\. RESALE[\s\S]*POTENTIAL/);
-  assert.match(page, /Passed items remain in this store segment/);
-  assert.match(page, /write\("active-session"/);
   assert.match(page, /capture="environment"/);
+  assert.match(css, /@media\(max-width:760px\)\{input,select,textarea/);
 });
 
-test("keeps external performance honest and documents secure sync", async () => {
-  const [page, architecture] = await Promise.all([
+test("prepares Supabase shared workspaces without replacing offline storage", async () => {
+  const [page, client, server, migration, guide] = await Promise.all([
     source("app/page.tsx"),
-    source("docs/integrations-architecture.md"),
+    source("lib/supabase/client.ts"),
+    source("lib/supabase/server.ts"),
+    source("supabase/migrations/202608120001_shared_workspace.sql"),
+    source("docs/supabase-shared-workspace.md"),
   ]);
 
-  assert.match(page, /function Performance\b/);
-  assert.match(page, /Local sales are ready\. External channels are not connected\./);
-  assert.match(page, /No sample metrics are shown\./);
-  assert.match(page, /0 OF 2 CONNECTED/);
-  assert.match(page, /No password entry · no scraping/);
-  assert.match(page, /Needs real synced data/);
-  assert.match(architecture, /OAuth authorization code flow and PKCE/);
-  assert.match(architecture, /encrypted server-side storage/);
-  assert.match(architecture, /Conversion must remain unavailable/);
-  assert.match(architecture, /Never scrape platform pages/);
+  assert.match(page, /indexedDB\.open\("vigilkline-local"/);
+  assert.match(client, /if \(!url \|\| !publishableKey\)[\s\S]*browserClient = null/);
+  assert.match(server, /createServerClient/);
+  assert.doesNotMatch(server, /SERVICE_ROLE/);
+  assert.match(migration, /create type public\.workspace_role as enum \('owner', 'member'\)/);
+  assert.match(migration, /enable row level security/);
+  assert.match(migration, /create or replace function public\.create_workspace/);
+  assert.match(migration, /workspace-photos/);
+  assert.match(guide, /Do not paste either value into chat or commit it/);
 });
