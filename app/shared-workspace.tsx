@@ -278,7 +278,6 @@ export function useSharedWorkspace({ localReady, currentSnapshot, localSnapshot,
 }
 
 export function SharedWorkspaceControl({ controller }: { controller: ReturnType<typeof useSharedWorkspace> }) {
-  if (!controller.configured) return null;
   const syncLabel = controller.syncState === "syncing" ? "Syncing" : controller.syncState === "pending" ? "Changes pending" : controller.syncState === "offline" ? "Offline cache" : "Synced";
   return <>
     <button className="workspace-trigger" onClick={() => controller.setPanelOpen(true)} aria-label="Shared workspace settings">
@@ -288,7 +287,7 @@ export function SharedWorkspaceControl({ controller }: { controller: ReturnType<
     </button>
     {controller.panelOpen && <div className="workspace-backdrop"><section className="workspace-panel" role="dialog" aria-modal="true" aria-label="Shared workspace">
       <header><div><small>SECURE SHARED WORKSPACE</small><h2>{controller.pending ? controller.pending.workspace.name : controller.active?.name || "VIGILKLINE Cloud"}</h2></div><button onClick={() => { controller.setPanelOpen(false); controller.setPending(null); }}>×</button></header>
-      {!controller.authReady ? <p className="workspace-loading">Checking sign-in…</p> : !controller.user ? <>
+      {!controller.configured ? <><p>Shared accounts are included, but this browser has not received the project’s secure cloud settings yet.</p><p className="workspace-message">Refresh after the current Vercel deployment finishes. Nothing on this device is deleted.</p></> : !controller.authReady ? <p className="workspace-loading">Checking sign-in…</p> : !controller.user ? <>
         <p>Sign in with a secure email link. VIGILKLINE never asks for or stores your email password.</p>
         <form className="workspace-auth" onSubmit={controller.sendMagicLink}><label>Email address<input type="email" required autoComplete="email" value={controller.email} onChange={event => controller.setEmail(event.target.value)} placeholder="you@example.com"/></label><button disabled={controller.busy}>{controller.busy ? "Sending…" : "Email me a sign-in link"}</button></form>
       </> : controller.pending ? <WorkspaceOnboarding controller={controller}/> : <>

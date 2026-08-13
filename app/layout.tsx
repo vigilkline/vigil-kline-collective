@@ -18,5 +18,8 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><meta name="theme-color" content="#07101d"/><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body></html>;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "";
+  const runtimeConfig = JSON.stringify({ url, publishableKey }).replace(/</g, "\\u003c");
+  return <html lang="en"><meta name="theme-color" content="#07101d"/><head>{url && publishableKey && <script dangerouslySetInnerHTML={{ __html: `window.__VIGILKLINE_SUPABASE__=${runtimeConfig};` }} />}</head><body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body></html>;
 }
