@@ -7,7 +7,7 @@ import { getSupabaseBrowserClient } from "../lib/supabase/client";
 import type { WorkspaceSnapshot } from "../lib/workspace-model";
 import {
   copyLocalIntoCloud, createWorkspace, emptySnapshot, listWorkspaces, loadWorkspaceSnapshot,
-  snapshotCounts, snapshotIsEmpty, syncWorkspaceChanges, type WorkspaceSummary,
+  inviteWorkspaceMember, listWorkspaceActivity, listWorkspaceMembers, snapshotCounts, snapshotIsEmpty, syncWorkspaceChanges, type WorkspaceActivity, type WorkspaceMember, type WorkspaceSummary,
 } from "../lib/supabase/workspaces";
 
 export type DataMode = "local" | "cloud";
@@ -55,6 +55,9 @@ export function useSharedWorkspace({ localReady, currentSnapshot, localSnapshot,
   const [panelOpen, setPanelOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
+  const [memberEmail, setMemberEmail] = useState("");
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [activity, setActivity] = useState<WorkspaceActivity[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [syncState, setSyncState] = useState<"local" | "synced" | "syncing" | "pending" | "offline">("local");
@@ -65,6 +68,12 @@ export function useSharedWorkspace({ localReady, currentSnapshot, localSnapshot,
   const resumedRef = useRef<string | null>(null);
 
   useEffect(() => { currentRef.current = currentSnapshot; }, [currentSnapshot]);
+
+  const refreshTeam = useCallback(async (workspaceId: string) => {
+    if (!client) return;
+    const [team, feed] = await Promise.all([listWorkspaceMembers(client, workspaceId), listWorkspaceActivity(client, workspaceId)]);
+    setMembers(team); setActivity(feed);
+  }, [client]);
 
   const hydrateCloud = useCallback((workspace: WorkspaceSummary, snapshot: WorkspaceSnapshot, baseline = snapshot, state: "synced" | "pending" | "offline" = "synced") => {
     baselineRef.current = baseline;
@@ -77,7 +86,8 @@ export function useSharedWorkspace({ localReady, currentSnapshot, localSnapshot,
     onHydrate(snapshot);
     window.localStorage.setItem(activeKey, workspace.id);
     saveCache(workspace.id, { current: snapshot, baseline }).catch(() => {});
-  }, [onHydrate, onModeChange, saveCache]);
+    refreshTeam(workspace.id).catch(() => {});
+  }, [onHydrate, onModeChange, refreshTeam, saveCache]);
 
   const fetchWorkspaces = useCallback(async (signedInUser: User) => {
     if (!client) return [];
@@ -269,11 +279,24 @@ export function useSharedWorkspace({ localReady, currentSnapshot, localSnapshot,
     setUser(null); setWorkspaces([]); setPanelOpen(false);
   };
 
+  const addMember = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!client || !active || active.role !== "owner" || !memberEmail.trim()) return;
+    setBusy(true); setMessage("");
+    try {
+      await inviteWorkspaceMember(client, active.id, memberEmail);
+      setMemberEmail("");
+      await refreshTeam(active.id);
+      setMessage("Team member added. Their next sign-in will open this shared workspace.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Could not add that person."); }
+    setBusy(false);
+  };
+
   return {
     configured: Boolean(client), authReady, user, workspaces, active, pending, mode, panelOpen, email, workspaceName,
-    message, busy, syncState, localCounts: snapshotCounts(localSnapshot), cloudCounts: pending ? snapshotCounts(pending.snapshot) : null,
-    setPanelOpen, setEmail, setWorkspaceName, setPending, sendMagicLink, makeWorkspace, inspectWorkspace, activatePending,
-    refresh, workLocally, signOut,
+    message, busy, syncState, memberEmail, members, activity, localCounts: snapshotCounts(localSnapshot), cloudCounts: pending ? snapshotCounts(pending.snapshot) : null,
+    setPanelOpen, setEmail, setWorkspaceName, setMemberEmail, setPending, sendMagicLink, makeWorkspace, inspectWorkspace, activatePending,
+    refresh, workLocally, signOut, addMember,
   };
 }
 
@@ -293,6 +316,8 @@ export function SharedWorkspaceControl({ controller }: { controller: ReturnType<
       </> : controller.pending ? <WorkspaceOnboarding controller={controller}/> : <>
         <div className="workspace-account"><span>{controller.user.email}</span><button onClick={controller.signOut}>Sign out</button></div>
         {controller.active && <section className="workspace-current"><small>ACTIVE WORKSPACE</small><b>{controller.active.name}</b><span>{controller.active.role === "owner" ? "Owner — full workspace access" : "Member — shared operational access"}</span><div><button onClick={controller.refresh} disabled={controller.busy}>↻ {controller.syncState === "pending" || controller.syncState === "offline" ? "Retry sync" : "Refresh now"}</button><button onClick={controller.workLocally}>Work locally</button></div></section>}
+        {controller.active && <section className="workspace-team"><small>TEAM</small><div className="workspace-members">{controller.members.map(member => <span key={member.userId}><b>{member.email}</b><i>{member.role}</i></span>)}</div>{controller.active.role === "owner" && <form onSubmit={controller.addMember}><input type="email" required value={controller.memberEmail} onChange={event => controller.setMemberEmail(event.target.value)} placeholder="Friend's sign-in email"/><button disabled={controller.busy}>Add member</button></form>}<p>Everyone in this workspace can add and edit shared records.</p></section>}
+        {controller.active && <section className="workspace-activity"><small>TEAM ACTIVITY</small>{controller.activity.length ? controller.activity.map(entry => <p key={entry.id}><b>{entry.actorEmail}</b> {entry.action} <span>{entry.detail}</span><time>{new Date(entry.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</time></p>) : <p>No shared changes yet.</p>}</section>}
         <div className="workspace-list"><small>{controller.active ? "SWITCH WORKSPACE" : "YOUR WORKSPACES"}</small>{controller.workspaces.length ? controller.workspaces.map(workspace => <button key={workspace.id} onClick={() => controller.inspectWorkspace(workspace)} disabled={controller.busy || workspace.id === controller.active?.id}><span><b>{workspace.name}</b><small>{workspace.role}</small></span><i>{workspace.id === controller.active?.id ? "Active" : "Open →"}</i></button>) : <p>No shared workspace yet. Create one below.</p>}</div>
         <form className="workspace-create" onSubmit={controller.makeWorkspace}><label>New workspace name<input maxLength={80} required value={controller.workspaceName} onChange={event => controller.setWorkspaceName(event.target.value)} placeholder="e.g. VIGILKLINE Collective"/></label><button disabled={controller.busy}>{controller.busy ? "Creating…" : "Create workspace"}</button></form>
       </>}

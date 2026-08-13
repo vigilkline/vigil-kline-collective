@@ -3,6 +3,8 @@ import type { EntityId, Item, SessionCandidate, Status, WorkspaceSnapshot } from
 
 export type WorkspaceRole = "owner" | "member";
 export type WorkspaceSummary = { id: string; name: string; role: WorkspaceRole; createdAt: string };
+export type WorkspaceMember = { userId: string; email: string; role: WorkspaceRole; joinedAt: string };
+export type WorkspaceActivity = { id: string; actorEmail: string; action: string; detail: string; createdAt: string };
 export type SnapshotCounts = { inventory: number; sessions: number; calendar: number; payments: number; photos: number };
 
 export const emptySnapshot = (): WorkspaceSnapshot => ({ items: [], priorities: [], taxRate: "0", taxPayments: [], sessions: [] });
@@ -39,6 +41,23 @@ export async function createWorkspace(client: SupabaseClient, name: string): Pro
   if (result.error) throw result.error;
   if (typeof result.data !== "string") throw new Error("The workspace could not be created.");
   return result.data;
+}
+
+export async function listWorkspaceMembers(client: SupabaseClient, workspaceId: string): Promise<WorkspaceMember[]> {
+  const result = await client.rpc("workspace_team", { target_workspace: workspaceId });
+  if (result.error) throw result.error;
+  return ((result.data || []) as Record<string, unknown>[]).map(row => ({ userId: String(row.user_id), email: String(row.email || "Team member"), role: row.role === "owner" ? "owner" : "member", joinedAt: String(row.joined_at) }));
+}
+
+export async function inviteWorkspaceMember(client: SupabaseClient, workspaceId: string, email: string) {
+  const result = await client.rpc("invite_workspace_member", { target_workspace: workspaceId, member_email: email.trim() });
+  if (result.error) throw result.error;
+}
+
+export async function listWorkspaceActivity(client: SupabaseClient, workspaceId: string): Promise<WorkspaceActivity[]> {
+  const result = await client.from("workspace_activity").select("id, actor_email, action, detail, created_at").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(12);
+  if (result.error) throw result.error;
+  return ((result.data || []) as Record<string, unknown>[]).map(row => ({ id: String(row.id), actorEmail: String(row.actor_email || "Team member"), action: String(row.action), detail: String(row.detail), createdAt: String(row.created_at) }));
 }
 
 async function signedPhotoMap(client: SupabaseClient, paths: string[]) {
