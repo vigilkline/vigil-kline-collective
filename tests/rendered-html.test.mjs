@@ -61,7 +61,7 @@ test("prepares Supabase shared workspaces without replacing offline storage", as
   assert.match(migration, /enable row level security/);
   assert.match(migration, /create or replace function public\.create_workspace/);
   assert.match(migration, /workspace-photos/);
-  assert.match(guide, /Do not paste either value into chat or commit it/);
+  assert.match(guide, /Do not paste configuration values into chat or commit them/);
 });
 
 test("ships the restrained navy industrial visual system", async () => {
@@ -80,4 +80,26 @@ test("ships the restrained navy industrial visual system", async () => {
   assert.match(layout, /theme-color" content="#07101d"/);
   assert.match(manifest, /"background_color": "#07101d"/);
   assert.match(favicon, /fill="#5b91ec"/);
+});
+
+test("implements deliberate authenticated shared-workspace onboarding", async () => {
+  const [page, shared, adapter, client, guide] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/shared-workspace.tsx"),
+    source("lib/supabase/workspaces.ts"),
+    source("lib/supabase/client.ts"),
+    source("docs/supabase-shared-workspace.md"),
+  ]);
+
+  assert.match(shared, /signInWithOtp/);
+  assert.doesNotMatch(shared, /type="password"|signInWithPassword/);
+  assert.match(shared, /Open cloud workspace/);
+  assert.match(shared, /Copy local records into cloud, then open/);
+  assert.match(shared, /device-local workspace is kept intact/);
+  assert.match(adapter, /rpc\("create_workspace"/);
+  assert.match(adapter, /inventory_items[\s\S]*thrift_sessions[\s\S]*calendar_entries[\s\S]*tax_payments/);
+  assert.match(adapter, /workspace-photos/);
+  assert.match(page, /dataMode!=="local"/);
+  assert.match(client, /if \(!url \|\| !publishableKey\)/);
+  assert.match(guide, /Signing in does not change the current data mode/);
 });

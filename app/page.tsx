@@ -1,17 +1,11 @@
 "use client";
 
-import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, Dispatch, FormEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CandidateDecision, EntityId, Item, Priority, SessionCandidate, SessionPhase, Status, TaxPayment, ThriftHistory, WorkspaceSnapshot } from "../lib/workspace-model";
+import { SharedWorkspaceControl, useSharedWorkspace, type CloudCache, type DataMode } from "./shared-workspace";
 
 type View = "dashboard" | "inventory" | "sessions" | "finances";
-type Status = "Owned" | "Ready" | "Published" | "Sold";
-type Item = { id: number; brand: string; description: string; size?: string; condition?: string; category?: string; cost: number; price: number; estimatedResale?: number; status: Status; photo?: string };
-type Priority = { id: number; text: string; horizon?: "Today" | "Tomorrow" | "Later"; date?: string; category?: string; time?: string; done: boolean };
-type TaxPayment = { id: number; amount: number; date: string };
 type SavedTaxSettings = { rate?: unknown; payments?: unknown };
-type SessionPhase = "driving" | "parking" | "store";
-type CandidateDecision = "undecided" | "bought" | "passed";
-type SessionCandidate = Omit<Item,"status"> & { decision: CandidateDecision };
-type ThriftHistory = { id:number; routeId?:number; date:string; startedAt:number; endedAt:number; location:string; budget:number; spend:number; projectedResale?:number; projectedProfit?:number; phaseTimes:Record<SessionPhase,number>; candidates:SessionCandidate[] };
 type ActiveSessionMeta = { budget?:unknown; location?:unknown; startedAt?:unknown; routeId?:unknown; phaseTimes?:Partial<Record<SessionPhase,number>> };
 
 const nav: { id: View; label: string; icon: string }[] = [
@@ -24,6 +18,9 @@ const localDate = (date = new Date()) => `${date.getFullYear()}-${String(date.ge
 const openDb = () => new Promise<IDBDatabase>((resolve, reject) => { const q = indexedDB.open("vigilkline-local", 2); q.onupgradeneeded = () => { if (!q.result.objectStoreNames.contains("workspace")) q.result.createObjectStore("workspace"); }; q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error); });
 const read = async (key: string) => { const db = await openDb(); return new Promise<unknown>((resolve) => { const q = db.transaction("workspace").objectStore("workspace").get(key); q.onsuccess = () => resolve(q.result); q.onerror = () => resolve(undefined); }); };
 const write = async (key: string, value: unknown) => { const db = await openDb(); return new Promise<void>((resolve,reject)=>{const tx=db.transaction("workspace","readwrite");tx.objectStore("workspace").put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);}); };
+const cloudCacheKey = (workspaceId:string) => `cloud-workspace:${workspaceId}`;
+const readCloudCache = async (workspaceId:string) => { const value=await read(cloudCacheKey(workspaceId));if(!value||typeof value!=="object")return null;const cache=value as Partial<CloudCache>;return cache.current&&cache.baseline?cache as CloudCache:null; };
+const writeCloudCache = (workspaceId:string,cache:CloudCache) => write(cloudCacheKey(workspaceId),cache);
 
 export default function Home() {
   const [view, setView] = useState<View>("dashboard");
@@ -35,16 +32,23 @@ export default function Home() {
   const [sessionOpen, setSessionOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const [toast, setToast] = useState("");
-  useEffect(() => { Promise.all([read("items"), read("priorities"), read("tax-settings"),read("thrift-sessions")]).then(([a,b,t,s]) => { setItems(Array.isArray(a) ? a : []); setPriorities(Array.isArray(b) ? b : []); setSessions(Array.isArray(s)?s:[]); if(t&&typeof t==="object"){const settings=t as SavedTaxSettings;setTaxRate(String(settings.rate??"0"));setTaxPayments(Array.isArray(settings.payments)?settings.payments:[]);} setReady(true); }).catch(() => setReady(true)); if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{}); }, []);
-  useEffect(() => { if (ready) write("items", items).catch(()=>{}); }, [items, ready]);
-  useEffect(() => { if (ready) write("priorities", priorities).catch(()=>{}); }, [priorities, ready]);
-  useEffect(() => { if (ready) write("tax-settings", {rate:taxRate,payments:taxPayments}).catch(()=>{}); }, [taxRate, taxPayments, ready]);
-  useEffect(() => { if (ready) write("thrift-sessions", sessions).catch(()=>{}); }, [sessions, ready]);
+  const [dataMode,setDataMode]=useState<DataMode>("local");
+  const [localSnapshot,setLocalSnapshot]=useState<WorkspaceSnapshot>({items:[],priorities:[],taxRate:"0",taxPayments:[],sessions:[]});
+  const dataModeRef=useRef<DataMode>("local");
+  const snapshot=useMemo<WorkspaceSnapshot>(()=>({items,priorities,taxRate,taxPayments,sessions}),[items,priorities,taxRate,taxPayments,sessions]);
+  const currentSnapshotRef=useRef(snapshot);
+  const hydrate=useCallback((next:WorkspaceSnapshot)=>{setItems(next.items);setPriorities(next.priorities);setTaxRate(next.taxRate);setTaxPayments(next.taxPayments);setSessions(next.sessions);},[]);
+  const changeDataMode=useCallback((mode:DataMode)=>{if(mode==="cloud")setLocalSnapshot(currentSnapshotRef.current);dataModeRef.current=mode;setDataMode(mode)},[]);
+  const shared=useSharedWorkspace({localReady:ready,currentSnapshot:snapshot,localSnapshot:dataMode==="local"?snapshot:localSnapshot,onHydrate:hydrate,onModeChange:changeDataMode,loadCache:readCloudCache,saveCache:writeCloudCache});
+  useEffect(() => { Promise.all([read("items"), read("priorities"), read("tax-settings"),read("thrift-sessions")]).then(([a,b,t,s]) => { const settings=t&&typeof t==="object"?t as SavedTaxSettings:{};const initial:WorkspaceSnapshot={items:Array.isArray(a)?a:[],priorities:Array.isArray(b)?b:[],sessions:Array.isArray(s)?s:[],taxRate:String(settings.rate??"0"),taxPayments:Array.isArray(settings.payments)?settings.payments:[]};setLocalSnapshot(initial);if(dataModeRef.current==="local")hydrate(initial);setReady(true); }).catch(() => setReady(true)); if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(()=>{}); }, [hydrate]);
+  useEffect(() => { currentSnapshotRef.current=snapshot; }, [snapshot]);
+  useEffect(() => { if (!ready||dataMode!=="local")return;Promise.all([write("items",items),write("priorities",priorities),write("tax-settings",{rate:taxRate,payments:taxPayments}),write("thrift-sessions",sessions)]).catch(()=>{}); }, [dataMode,items,priorities,ready,sessions,taxPayments,taxRate]);
   const notify = (s:string) => { setToast(s); window.setTimeout(()=>setToast(""),2200); };
   const sold = items.filter(i=>i.status === "Sold");
   const revenue = sold.reduce((n,i)=>n+i.price,0), costs = items.reduce((n,i)=>n+i.cost,0);
   return <div className="shell">
     <aside><button className="brand" onClick={()=>setView("dashboard")}><span>V</span> VIGILKLINE</button><nav>{nav.map(n=><button key={n.id} className={view===n.id?"active":""} onClick={()=>setView(n.id)}><span>{n.icon}</span>{n.label}</button>)}</nav></aside>
+    <SharedWorkspaceControl controller={shared}/>
     <main>{view!=="dashboard"&&<header><button className="start" onClick={()=>setSessionOpen(true)}>◎ Start thrift session</button></header>}
       {view==="dashboard" && <Dashboard items={items} priorities={priorities} setPriorities={setPriorities} start={()=>setSessionOpen(true)}/>}
       {view==="inventory" && <Inventory items={items} setItems={setItems} start={()=>setSessionOpen(true)} notify={notify}/>} 
@@ -69,7 +73,7 @@ function BrandCalendar({priorities,setPriorities}:{priorities:Priority[];setPrio
   const today=localDate();
   const [selected,setSelected]=useState(today), [month,setMonth]=useState(()=>new Date(`${today}T12:00:00`));
   const [text,setText]=useState(""), [category,setCategory]=useState(""), [time,setTime]=useState("");
-  const [agenda,setAgenda]=useState<"day"|"week">("day"), [editing,setEditing]=useState<number|null>(null), [editText,setEditText]=useState("");
+  const [agenda,setAgenda]=useState<"day"|"week">("day"), [editing,setEditing]=useState<EntityId|null>(null), [editText,setEditText]=useState("");
   const fallbackDate=(days:number)=>{const value=new Date(`${today}T12:00:00`);value.setDate(value.getDate()+days);return localDate(value)};
   const taskDate=(p:Priority)=>p.date||(p.horizon==="Tomorrow"?fallbackDate(1):p.horizon==="Later"?fallbackDate(6):today);
   const first=new Date(month.getFullYear(),month.getMonth(),1,12), start=new Date(first); start.setDate(1-first.getDay());
@@ -103,7 +107,7 @@ function Finances({items,revenue,costs,taxRate,setTaxRate,taxPayments,setTaxPaym
 function Title({eyebrow,title,copy,action,actionLabel}:{eyebrow:string;title:string;copy:string;action?:()=>void;actionLabel?:string}){return <section className="title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></div>{action&&<button className="start" onClick={action}>{actionLabel}</button>}</section>}
 
 function PastSessions({sessions}:{sessions:ThriftHistory[]}){
-  const [open,setOpen]=useState<number|null>(sessions[0]?.id??null);
+  const [open,setOpen]=useState<EntityId|null>(sessions[0]?.id??null);
   const rows=sessions.map(s=>{const bought=s.candidates.filter(c=>c.decision==="bought"),passed=s.candidates.filter(c=>c.decision==="passed"),resale=s.projectedResale??bought.reduce((n,c)=>n+(c.estimatedResale||0),0),profit=s.projectedProfit??resale-s.spend;return {s,bought,passed,resale,profit}});
   return <div className="page section"><Title eyebrow="STORE PERFORMANCE" title="Past thrift sessions" copy="Each completed store is saved as its own segment so you can compare stops and plan stronger routes."/>{sessions.length===0?<Empty icon="◷" title="No past sessions" copy="Finish a store segment and its name, timing, spend, projections, and decisions will be saved on this device."/>:<><section className="store-comparison"><div className="comparison-head"><div><small>ROUTE PLANNING</small><h2>Compare store performance</h2></div><p>Projected figures use only your resale estimates and exclude fees.</p></div><div className="comparison-table"><div className="comparison-labels"><span>STORE</span><span>DECISIONS</span><span>TIME</span><span>SPEND</span><span>EST. RESALE</span><span>POTENTIAL</span></div>{rows.map(({s,bought,passed,resale,profit})=><div className="comparison-row" key={`compare-${s.id}`}><span><b>{s.location||"Legacy unnamed store"}</b><small>{new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}</small></span><span>{bought.length} bought · {passed.length} passed</span><span>{formatDuration(s.phaseTimes.store)}</span><strong>{money(s.spend)}</strong><strong>{money(resale)}</strong><strong className={profit<0?"negative":"positive"}>{money(profit)}</strong></div>)}</div></section><div className="session-history">{rows.map(({s,bought,passed,resale,profit})=><article className="history-card" key={s.id}><button className="history-summary" onClick={()=>setOpen(open===s.id?null:s.id)}><div><small>{new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} · STORE SEGMENT</small><h2>{s.location||"Legacy unnamed store"}</h2><p>{bought.length} bought · {passed.length} passed · {formatDuration(s.phaseTimes.store)} in store</p></div><div className="history-thumbs">{s.candidates.slice(0,4).map(c=>c.photo?<img key={c.id} src={c.photo} alt=""/>:<span key={c.id}>VK</span>)}</div><strong>{money(profit)}<small>projected profit</small></strong><i>{open===s.id?"−":"+"}</i></button>{open===s.id&&<div className="history-detail"><div className="history-metrics"><span><small>TOTAL TIME</small><b>{formatDuration(s.phaseTimes.driving+s.phaseTimes.parking+s.phaseTimes.store)}</b></span><span><small>IN STORE</small><b>{formatDuration(s.phaseTimes.store)}</b></span><span><small>SPEND</small><b>{money(s.spend)}</b></span><span><small>EST. RESALE</small><b>{money(resale)}</b></span><span><small>POTENTIAL PROFIT</small><b>{money(profit)}</b></span><span><small>TRAVEL + TRANSITION</small><b>{formatDuration(s.phaseTimes.driving+s.phaseTimes.parking)}</b></span></div><h3>Bought</h3><HistoryCandidates candidates={bought}/><h3>Passed</h3><HistoryCandidates candidates={passed}/></div>}</article>)}</div></>}</div>;
 }
@@ -114,21 +118,21 @@ function ThriftSession({close,checkpoint,commit}:{close:()=>void;checkpoint:(ses
   const [cart,setCart]=useState<SessionCandidate[]>([]), [draft,setDraft]=useState({brand:"",description:"",size:"",condition:"",category:"",cost:"",resale:""}), [photo,setPhoto]=useState("");
   const [analysis,setAnalysis]=useState<"idle"|"working"|"ready"|"error">("idle"), [analysisMessage,setAnalysisMessage]=useState("");
   const [budget,setBudget]=useState("100"), [now,setNow]=useState(()=>Date.now()), [captureOpen,setCaptureOpen]=useState(false);
-  const [location,setLocation]=useState(""), [startedAt,setStartedAt]=useState(()=>Date.now()), [routeId,setRouteId]=useState(()=>Date.now()), [reviewAction,setReviewAction]=useState<"finish"|"location"|null>(null), [nextLocation,setNextLocation]=useState("");
+  const [location,setLocation]=useState(""), [startedAt,setStartedAt]=useState(()=>Date.now()), [routeId,setRouteId]=useState<EntityId>(()=>Date.now()), [reviewAction,setReviewAction]=useState<"finish"|"location"|null>(null), [nextLocation,setNextLocation]=useState("");
   const [phase,setPhase]=useState<SessionPhase|null>(null), [phaseStartedAt,setPhaseStartedAt]=useState<number|null>(null), [phaseTimes,setPhaseTimes]=useState<Record<SessionPhase,number>>({driving:0,parking:0,store:0});
   const bought=cart.filter(i=>i.decision==="bought"), total=useMemo(()=>bought.reduce((n,i)=>n+i.cost,0),[bought]), projected=useMemo(()=>bought.reduce((n,i)=>n+(i.estimatedResale||0),0),[bought]);
   const candidateSpend=useMemo(()=>cart.reduce((n,i)=>n+i.cost,0),[cart]), candidateResale=useMemo(()=>cart.reduce((n,i)=>n+(i.estimatedResale||0),0),[cart]);
   const potential=projected-total, candidatePotential=candidateResale-candidateSpend, candidateMargin=candidateResale>0?Math.round((candidatePotential/candidateResale)*100):0, remaining=(Number(budget)||0)-candidateSpend;
   const liveTimes=useMemo(()=>{const times={...phaseTimes};if(phase&&phaseStartedAt)times[phase]+=Math.max(0,Math.floor((now-phaseStartedAt)/1000));return times;},[phaseTimes,phase,phaseStartedAt,now]);
   const elapsed=liveTimes.driving+liveTimes.parking+liveTimes.store, elapsedLabel=formatDuration(elapsed);
-  useEffect(()=>{Promise.all([read("active-session"),read("active-session-meta")]).then(([v,m])=>{if(Array.isArray(v))setCart((v as Partial<SessionCandidate>[]).map(i=>({...i,decision:"undecided"} as SessionCandidate)));if(m&&typeof m==="object"){const saved=m as ActiveSessionMeta;if(saved.budget)setBudget(String(saved.budget));if(saved.location)setLocation(String(saved.location));if(saved.startedAt)setStartedAt(Number(saved.startedAt));if(saved.routeId)setRouteId(Number(saved.routeId));if(saved.phaseTimes)setPhaseTimes({...{driving:0,parking:0,store:0},...saved.phaseTimes});}}).catch(()=>{});const timer=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(timer);},[]);
+  useEffect(()=>{Promise.all([read("active-session"),read("active-session-meta")]).then(([v,m])=>{if(Array.isArray(v))setCart((v as Partial<SessionCandidate>[]).map(i=>({...i,decision:"undecided"} as SessionCandidate)));if(m&&typeof m==="object"){const saved=m as ActiveSessionMeta;if(saved.budget)setBudget(String(saved.budget));if(saved.location)setLocation(String(saved.location));if(saved.startedAt)setStartedAt(Number(saved.startedAt));if(typeof saved.routeId==="string"||typeof saved.routeId==="number")setRouteId(saved.routeId);if(saved.phaseTimes)setPhaseTimes({...{driving:0,parking:0,store:0},...saved.phaseTimes});}}).catch(()=>{});const timer=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(timer);},[]);
   useEffect(()=>{write("active-session",cart).catch(()=>{});},[cart]);
   useEffect(()=>{write("active-session-meta",{budget,location,startedAt,routeId,phaseTimes:liveTimes}).catch(()=>{});},[budget,location,startedAt,routeId,liveTimes]);
   const changePhase=(next:SessionPhase|null)=>{const timestamp=now;const updated={...phaseTimes};if(phase&&phaseStartedAt)updated[phase]+=Math.max(0,Math.floor((timestamp-phaseStartedAt)/1000));setPhaseTimes(updated);setPhase(next);setPhaseStartedAt(next?timestamp:null);};
   async function analyzePhoto(imageDataUrl:string){setAnalysis("working");setAnalysisMessage("Checking the photo…");try{const response=await fetch("/api/garment-analysis",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({imageDataUrl})});const result=await response.json() as {suggestion?:{brand?:string;description?:string;tagPrice?:number|null};error?:string};if(!response.ok||!result.suggestion)throw new Error(result.error||"AI check could not finish.");const s=result.suggestion;setDraft(current=>({...current,brand:s.brand||current.brand,description:s.description||current.description,cost:s.tagPrice!=null&&current.cost===""?String(s.tagPrice):current.cost}));setAnalysis("ready");setAnalysisMessage(s.tagPrice!=null?"Suggestion added — confirm the tag price before saving.":"Suggestion added — verify it before saving.");}catch(error){setAnalysis("error");setAnalysisMessage(error instanceof Error?error.message:"AI check could not finish.");}}
   function capture(e:ChangeEvent<HTMLInputElement>){const file=e.target.files?.[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{const imageDataUrl=String(reader.result);setPhoto(imageDataUrl);analyzePhoto(imageDataUrl);};reader.readAsDataURL(file);}
   function add(e:FormEvent){e.preventDefault();if(!photo||!draft.cost)return;setCart(v=>[{id:Date.now(),brand:draft.brand.trim(),description:draft.description.trim(),size:draft.size.trim(),condition:draft.condition.trim(),category:draft.category.trim(),cost:Number(draft.cost)||0,price:0,estimatedResale:Number(draft.resale)||undefined,decision:"undecided",photo},...v]);setDraft({brand:"",description:"",size:"",condition:"",category:"",cost:"",resale:""});setPhoto("");setAnalysis("idle");setAnalysisMessage("");setCaptureOpen(false);}
-  const decide=(id:number,decision:CandidateDecision)=>setCart(v=>v.map(i=>i.id===id?{...i,decision}:i));
+  const decide=(id:EntityId,decision:CandidateDecision)=>setCart(v=>v.map(i=>i.id===id?{...i,decision}:i));
   const openReview=(action:"finish"|"location")=>{changePhase(null);setCart(current=>current.map(item=>({...item,decision:"undecided"})));setReviewAction(action);};
   const cancelReview=()=>{setCart(current=>current.map(item=>({...item,decision:"undecided"})));setReviewAction(null)};
   const reviewedRecords=()=>{const endedAt=Date.now();const session:ThriftHistory={id:endedAt,routeId,date:localDate(),startedAt,endedAt,location:location.trim(),budget:Number(budget)||0,spend:total,projectedResale:projected,projectedProfit:potential,phaseTimes:{...liveTimes},candidates:cart};const inventory:Item[]=bought.map(i=>({id:i.id,brand:i.brand,description:i.description,size:i.size,condition:i.condition,category:i.category,cost:i.cost,price:i.price,estimatedResale:i.estimatedResale,photo:i.photo,status:"Owned"}));return {session,inventory}};

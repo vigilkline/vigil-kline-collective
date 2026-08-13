@@ -1,8 +1,8 @@
 # VIGILKLINE
 
 A dark, offline-first workspace for resale inventory, multi-store sourcing
-sessions, finances, and brand planning. It runs on vinext and currently saves
-operational data in browser IndexedDB.
+sessions, finances, and brand planning. It runs on vinext, keeps a device-local
+IndexedDB workspace, and can connect to authenticated Supabase shared workspaces.
 
 ## Prerequisites
 
@@ -20,11 +20,11 @@ This starter does not use `wrangler.jsonc`.
 
 ## Current architecture
 
-- `app/` contains the VIGILKLINE UI and offline persistence.
+- `app/` contains the VIGILKLINE UI, offline persistence, magic-link sign-in, and deliberate cloud onboarding.
 - `server/routes/api/garment-analysis.post.ts` keeps garment analysis server-side.
-- `lib/supabase/client.ts` is dormant until public Supabase configuration exists.
-- `supabase/migrations/` prepares authenticated shared workspaces with row-level security and private photo storage.
-- [Supabase shared-workspace setup](docs/supabase-shared-workspace.md) explains the exact next step and rollout sequence.
+- `lib/supabase/` contains lazy clients plus workspace-scoped load/sync adapters.
+- `supabase/migrations/` defines authenticated shared workspaces with row-level security and private photo storage.
+- [Supabase shared-workspace setup](docs/supabase-shared-workspace.md) explains configuration, onboarding, and security behavior.
 
 Do not commit environment files or service-role credentials. The app continues
 to work locally when Supabase is not configured.
